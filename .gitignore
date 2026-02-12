@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+dist/
+*.egg-info/
+
+# Node.js
+node_modules/
+dist/
+build/
+*.log
+.env*
+
+# Universal
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
+.idea/
+
+# Editor/IDE specific
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+*.bak
+*.orig
+*.swp
+*.swo
+*.pyc
+*.pyo
+__pycache__
+.env
+.DS_Store

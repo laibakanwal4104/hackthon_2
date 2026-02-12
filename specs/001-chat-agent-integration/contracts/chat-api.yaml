@@ -1,0 +1,332 @@
+openapi: 3.0.3
+info:
+  title: Chat API
+  description: AI-powered chat interface for natural language todo management
+  version: 1.0.0
+  contact:
+    name: Phase-III Chat Agent Integration
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+
+security:
+  - BearerAuth: []
+
+paths:
+  /chat:
+    post:
+      summary: Send chat message
+      description: |
+        Send a message to the AI agent and receive a response. The agent can invoke
+        MCP tools to perform todo operations. The endpoint is stateless and reconstructs
+        conversation context from the database on each request.
+      operationId: sendChatMessage
+      tags:
+        - Chat
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+            examples:
+              newConversation:
+                summary: Start new conversation
+                value:
+                  message: "Hello, what can you help me with?"
+              existingConversation:
+                summary: Continue conversation
+                value:
+                  message: "Add a task to buy groceries"
+                  conversation_id: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Successful response with agent message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+              examples:
+                greeting:
+                  summary: Agent greeting
+                  value:
+                    response: "Hello! I'm your AI assistant for managing todo tasks. I can help you create, list, update, and delete tasks. What would you like to do?"
+                    conversation_id: "550e8400-e29b-41d4-a716-446655440000"
+                    message_id: "660e8400-e29b-41d4-a716-446655440001"
+                    tool_calls: []
+                taskCreated:
+                  summary: Task creation with tool call
+                  value:
+                    response: "I've created a new task: 'Buy groceries'. Is there anything else you'd like to add?"
+                    conversation_id: "550e8400-e29b-41d4-a716-446655440000"
+                    message_id: "660e8400-e29b-41d4-a716-446655440002"
+                    tool_calls:
+                      - tool_name: "create_todo"
+                        input_params:
+                          title: "Buy groceries"
+                        output_result:
+                          success: true
+                          task_id: "770e8400-e29b-41d4-a716-446655440003"
+                          message: "Created todo: Buy groceries"
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                emptyMessage:
+                  summary: Empty message
+                  value:
+                    error:
+                      code: "INVALID_INPUT"
+                      message: "Message cannot be empty"
+                      details: null
+        '401':
+          description: Unauthorized - missing or invalid JWT token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unauthorized:
+                  summary: Missing token
+                  value:
+                    error:
+                      code: "UNAUTHORIZED"
+                      message: "Authentication required"
+                      details: null
+        '500':
+          description: Internal server error (agent error, database error, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                agentError:
+                  summary: Agent processing error
+                  value:
+                    error:
+                      code: "AGENT_ERROR"
+                      message: "Failed to process message"
+                      details: "OpenAI API timeout"
+
+  /chat/history:
+    get:
+      summary: Get conversation history
+      description: |
+        Retrieve the full message history for the user's active conversation.
+        Returns messages in chronological order.
+      operationId: getChatHistory
+      tags:
+        - Chat
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: conversation_id
+          in: query
+          description: Specific conversation ID (optional, defaults to active conversation)
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          description: Maximum number of messages to return
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: Conversation history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatHistoryResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token from Phase-II authentication
+
+  schemas:
+    ChatRequest:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: User's message to the agent
+          example: "Add a task to buy groceries"
+        conversation_id:
+          type: string
+          format: uuid
+          description: |
+            Optional conversation ID to continue existing conversation.
+            If not provided, uses or creates active conversation for user.
+          example: "550e8400-e29b-41d4-a716-446655440000"
+
+    ChatResponse:
+      type: object
+      required:
+        - response
+        - conversation_id
+        - message_id
+        - tool_calls
+      properties:
+        response:
+          type: string
+          description: Agent's response message
+          example: "I've created a new task: 'Buy groceries'"
+        conversation_id:
+          type: string
+          format: uuid
+          description: Conversation identifier
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        message_id:
+          type: string
+          format: uuid
+          description: ID of the agent's message
+          example: "660e8400-e29b-41d4-a716-446655440001"
+        tool_calls:
+          type: array
+          description: List of MCP tools invoked by the agent
+          items:
+            $ref: '#/components/schemas/ToolCall'
+
+    ToolCall:
+      type: object
+      required:
+        - tool_name
+        - input_params
+        - output_result
+      properties:
+        tool_name:
+          type: string
+          enum:
+            - create_todo
+            - list_todos
+            - update_todo
+            - delete_todo
+            - mark_todo_complete
+          description: Name of the MCP tool invoked
+          example: "create_todo"
+        input_params:
+          type: object
+          description: Parameters passed to the tool
+          example:
+            title: "Buy groceries"
+            description: "Milk, eggs, bread"
+        output_result:
+          type: object
+          description: Result returned by the tool
+          example:
+            success: true
+            task_id: "770e8400-e29b-41d4-a716-446655440003"
+            message: "Created todo: Buy groceries"
+
+    ChatHistoryResponse:
+      type: object
+      required:
+        - conversation_id
+        - messages
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+          description: Conversation identifier
+        messages:
+          type: array
+          description: List of messages in chronological order
+          items:
+            $ref: '#/components/schemas/MessageItem'
+
+    MessageItem:
+      type: object
+      required:
+        - id
+        - role
+        - content
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Message identifier
+        role:
+          type: string
+          enum:
+            - user
+            - agent
+            - system
+          description: Message role
+        content:
+          type: string
+          description: Message text content
+        created_at:
+          type: string
+          format: date-time
+          description: Message creation timestamp
+        tool_calls:
+          type: array
+          description: Tool calls associated with this message (agent messages only)
+          items:
+            $ref: '#/components/schemas/ToolCall'
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              description: Error code
+              enum:
+                - INVALID_INPUT
+                - UNAUTHORIZED
+                - FORBIDDEN
+                - NOT_FOUND
+                - AGENT_ERROR
+                - TOOL_ERROR
+                - DATABASE_ERROR
+                - INTERNAL_ERROR
+              example: "INVALID_INPUT"
+            message:
+              type: string
+              description: Human-readable error message
+              example: "Message cannot be empty"
+            details:
+              type: string
+              nullable: true
+              description: Additional error details (optional)
+              example: null
